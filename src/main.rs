@@ -1,7 +1,12 @@
 #![allow(unused_imports)]
 use core::str;
-use std::net::TcpListener;
+use std::{
+    io::{Read, Write},
+    net::{TcpListener, TcpStream},
+    thread::Thread,
+};
 
+mod blocking;
 mod server;
 
 static DEFAULT_PORT: &str = "9092";
@@ -17,16 +22,41 @@ fn main() {
 
 fn sync_main() {
     let listener = TcpListener::bind(format!("127.0.0.1:{}", DEFAULT_PORT)).unwrap();
-
+    let threadpool = blocking::ThreadPool::new(4);
     for stream in listener.incoming() {
         match stream {
-            Ok(_stream) => {
-                println!("accepted new connection");
+            Ok(conn) => {
+                let _ = threadpool.execute(move || sync_run(conn));
             }
             Err(e) => {
                 println!("error: {}", e);
             }
         }
+    }
+}
+
+fn sync_run(mut conn: TcpStream) {
+    println!("accepted new connection");
+    let mut buf = [0; 1024];
+    loop {
+        if let Ok(n) = conn.read(&mut buf) {
+            println!("received {} bytes", n);
+
+            // exit
+            if n == 0 {
+                return;
+            }
+
+            #[cfg(feature = "diagnostic")]
+            println!("\nReceived: {}", str::from_utf8(&buf[0..n]).unwrap());
+
+            if let Ok(()) = conn.write_all(&buf[..n]) {
+                #[cfg(feature = "diagnostic")]
+                println!("sent {}", str::from_utf8(&buf[0..n]).unwrap());
+            }
+        }
+        // reset buffer contents
+        buf.fill(0);
     }
 }
 
